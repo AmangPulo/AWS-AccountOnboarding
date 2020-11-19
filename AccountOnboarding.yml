@@ -1,0 +1,118 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description:
+  Account onboarding template for new AWS accounts.
+  
+Parameters:
+  IncludeCloudTrail:
+    Type: String
+    Default: Include
+    Description: "Will you enable CloudTrail in your account?"
+    AllowedValues:
+      - Include
+      - Do not Include
+  IncludeAWSConfig:
+    Type: String
+    Default: Include
+    Description: Will you enable AWSConfig in your account?
+    AllowedValues:
+      - Include
+      - Do not Include
+  IncludeGuardDuty:
+    Type: String
+    Default: Include
+    Description: Will you enable GuardDuty in your account?
+    AllowedValues:
+      - Include
+      - Do not Include
+  IncludeSecurityHub:
+    Type: String
+    Default: Include
+    Description: "Will you enable SecurityHub in your account?"
+    AllowedValues:
+      - Include
+      - Do not Include
+  IncludeRolesandPolicies:
+    Type: String
+    Default: Include
+    Description: Do you want to create the roles and policies for you?
+    AllowedValues:
+      - Include
+      - Do not Include
+Conditions:
+#AWS Config is a regional resource
+  BuildAWSConfigResource:  !Equals [ !Ref IncludeAWSConfig, Include ]
+#CloudTrail is a regional resource but can be configured globally
+  BuildCloudTrailResource:  !Equals [ !Ref IncludeCloudTrail, Include ]
+#GuardDuty is a regional resource
+  BuildGuardDutyResource: !Equals [ !Ref IncludeGuardDuty, Include ]
+#SecurityHub is a regional resource
+  BuildSecurityHub: !Equals [ !Ref IncludeSecurityHub, Include ]
+#Roles and policies are Global resources
+  BuildRolesandPolicies: !Equals [ !Ref IncludeRolesandPolicies, Include]
+Resources:
+  CloudTrailS3Bucket:
+    Type: AWS::S3::Bucket
+    Condition: BuildCloudTrailResource
+    Properties:
+      BucketName: !Sub 'cloudtrail-${AWS::AccountId}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+    DeletionPolicy: Delete
+  CloudTrailBucketPolicy:
+    Type: AWS::S3::BucketPolicy    
+    Condition: BuildCloudTrailResource
+    Properties:
+      Bucket:
+        Ref: CloudTrailS3Bucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          -
+            Sid: "AWSCloudTrailAclCheck"
+            Effect: "Allow"
+            Principal:
+              Service: "cloudtrail.amazonaws.com"
+            Action: "s3:GetBucketAcl"
+            Resource: !GetAtt CloudTrailS3Bucket.Arn
+          - 
+            Sid: "AWSCloudTrailWrite"
+            Effect: "Allow"
+            Principal:
+              Service: "cloudtrail.amazonaws.com"
+            Action: "s3:PutObject"
+            Resource: !Sub |-
+              arn:aws:s3:::${CloudTrailS3Bucket}/AWSLogs/${AWS::AccountId}/*
+            Condition:
+              StringEquals:
+                s3:x-amz-acl: "bucket-owner-full-control"
+  CloudTrailResource: 
+        DependsOn: 
+          - CloudTrailBucketPolicy
+        Type: AWS::CloudTrail::Trail
+        Properties: 
+          S3BucketName: 
+            Ref: CloudTrailS3Bucket
+          IsLogging: true
+          IsMultiRegionTrail: true
+          IncludeGlobalServiceEvents: true
+  GuardutyDetector:
+    Type: AWS::GuardDuty::Detector
+    Condition: BuildGuardDutyResource
+    Properties:
+        Enable: True
+        FindingPublishingFrequency: FIFTEEN_MINUTES
+#Create SecurityHub Resource
+  SecurityHubResource:
+      Type: AWS::SecurityHub::Hub
+      Condition: BuildSecurityHub
+      Properties:
+        Tags:
+          Name: !Sub security-hub-${AWS::Region}
+
+#Create AWS Config template
+#Things to do:
+#Create Roles and Policies
