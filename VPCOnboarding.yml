@@ -1,0 +1,320 @@
+---
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description:
+  Initial Template Configuration for 1ISA projects
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: CustomProject
+    Description: The ProjectName will be included in all the tags for your resources.
+  Environment:
+    Type: String
+    Default: UAT
+    AllowedValues:
+      - UAT
+      - PRD
+    Description: The Environment variable will define what infrastructure will be built like CIDR Block for VPCs and Subnets
+Outputs:
+  primarynateip:
+    Description:  IP Address of the Primary NAT EIP
+    Value: !Ref primarynateip
+  standbynateip:
+    Description: IP Address of the Secondary NAT EIP
+    Value: !Ref standbynateip
+  vpcid:
+    Description:  The unique id of the VPC created
+    Value: !Ref vpcresource
+    Export: 
+      Name: !Sub "${AWS::StackName}-VPCID"
+Mappings:
+  IpBlockMap:
+    VPC:
+      "UAT": "10.0.0.0/16"
+      "PRD": "10.1.0.0/16"
+    PublicSubnetPrimary:
+      "UAT": "10.0.0.0/24"
+      "PRD": "10.1.0.0/24"
+    "PrivateSubnetPrimary":
+      "UAT": "10.0.1.0/24"
+      "PRD": "10.1.1.0/24"
+    "DatabaseSubnetPrimary":
+      "UAT": "10.0.2.0/24"
+      "PRD": "10.1.2.0/24"
+    "PublicSubnetStandby":
+      "UAT": "10.0.10.0/24"
+      "PRD": "10.1.10.0/24"
+    "PrivateSubnetStandby":
+      "UAT": "10.0.11.0/24"
+      "PRD": "10.1.11.0/24"
+    "DatabaseSubnetStandby": 
+      "UAT": "10.0.12.0/24"
+      "PRD": "10.1.12.0/24"
+  AvailabilityZones:
+    "us-east-1":
+      "PrimaryAZ": "us-east-1a"
+      "StandbyAZ": "us-east-1b"
+    "ap-southeast-1":
+      "PrimaryAZ": "ap-southeast-1a"
+      "StandbyAZ": "ap-southeast-1b"
+    "ap-southeast-2":
+      "PrimaryAZ": "ap-southeast-2a"
+      "StandbyAZ": "ap-southeast-2b"
+  CustomParameters:
+    "logretention":
+      "UAT": 14
+      "PRD": 30
+
+Resources:
+  vpcresource:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !FindInMap [IpBlockMap, VPC, !Ref "Environment"]
+      InstanceTenancy: default
+      EnableDnsSupport: 'true'
+      EnableDnsHostnames: 'false'
+      Tags:
+      - Key: Name
+        Value: !Join [ "-", [ vpc,!Ref "ProjectName", !Ref "Environment"] ]
+  primarypulicsubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !FindInMap [AvailabilityZones, !Ref "AWS::Region" , "PrimaryAZ"]
+      CidrBlock: !FindInMap [IpBlockMap, PublicSubnetPrimary, !Ref "Environment"]
+      Tags:
+      - Key: Name
+        Value: !Join [ " ", [ !Ref "Environment" , "Public Subnet Primary"]]
+      VpcId: !Ref "vpcresource"
+  primaryprivatesubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !FindInMap [AvailabilityZones, !Ref "AWS::Region" , "PrimaryAZ"]
+      CidrBlock: !FindInMap [IpBlockMap, PrivateSubnetPrimary, !Ref "Environment"]
+      Tags:
+      - Key: Name
+        Value: !Join [ " ", [ !Ref "Environment" , "Private Subnet Primary"]]
+      VpcId: !Ref "vpcresource"
+  primarydatabasesubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !FindInMap [AvailabilityZones, !Ref "AWS::Region" , "PrimaryAZ"]
+      CidrBlock: !FindInMap [IpBlockMap, DatabaseSubnetPrimary, !Ref "Environment"]
+      Tags:
+      - Key: Name
+        Value: !Join [ " ", [ !Ref "Environment" , "Database Subnet Primary"]]
+      VpcId: !Ref "vpcresource"
+  standbypulicsubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !FindInMap [AvailabilityZones, !Ref "AWS::Region" , "StandbyAZ"]
+      CidrBlock: !FindInMap [IpBlockMap, PublicSubnetStandby, !Ref "Environment"]
+      Tags:
+      - Key: Name
+        Value: !Join [ " ", [ !Ref "Environment" , "Public Subnet Standby"]]
+      VpcId: !Ref "vpcresource"
+  standbyprivatesubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !FindInMap [AvailabilityZones, !Ref "AWS::Region" , "StandbyAZ"]
+      CidrBlock: !FindInMap [IpBlockMap, PrivateSubnetStandby, !Ref "Environment"]
+      Tags:
+      - Key: Name
+        Value: !Join [ " ", [ !Ref "Environment" , "Private Subnet Standby"]]
+      VpcId: !Ref "vpcresource"
+  standbydatabasesubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !FindInMap [AvailabilityZones, !Ref "AWS::Region" , "StandbyAZ"]
+      CidrBlock: !FindInMap [IpBlockMap, DatabaseSubnetStandby, !Ref "Environment"]
+      Tags:
+      - Key: Name
+        Value: !Join [ " ", [ !Ref "Environment" , "Database Subnet Standby"]]
+      VpcId: !Ref "vpcresource"
+  internetgateway:
+    Type: AWS::EC2::InternetGateway
+    Properties: 
+      Tags: 
+      - Key: Name
+        Value: !Join [ "-", [ igw, !Ref "ProjectName", !Ref "Environment"]]
+  igwattachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties: 
+      InternetGatewayId: !Ref internetgateway
+      VpcId: !Ref vpcresource
+  FlowLogRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service: "vpc-flow-logs.amazonaws.com"
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: "flowlogs-policy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement: 
+            - Effect: Allow
+              Action:
+              - "logs:CreateLogStream"
+              - "logs:PutLogEvents"
+              - "logs:describeLogGroups"
+              - "logs: DescribeLogStreams"
+              Resource: !GetAtt "LogGroup.Arn"
+  LogGroup:
+    Type: "AWS::Logs::LogGroup"
+    Properties:
+      RetentionInDays: !FindInMap [CustomParameters, "logretention", !Ref "Environment"]
+      LogGroupName: !Join ["-", ["fl-loggroup", !Ref "ProjectName", !Ref "Environment"]]
+  vpcflowlog:
+    Type: 'AWS::EC2::FlowLog'
+    Properties:
+      DeliverLogsPermissionArn: !GetAtt 
+        - FlowLogRole
+        - Arn
+      LogGroupName: !Join [ "-", [ fl, !Ref "ProjectName", !Ref "Environment"]]
+      ResourceType: VPC
+      TrafficType: ALL
+      ResourceId: !Ref vpcresource
+  primarynatgw:
+    Type: "AWS::EC2::NatGateway"
+    Properties:
+      AllocationId: 
+        Fn::GetAtt:
+        - primarynateip
+        - AllocationId
+      SubnetId: !Ref primarypulicsubnet
+      Tags: 
+      - Key: Name
+        Value: !Join [ "-", [ ngw-primary, !Ref "ProjectName", !Ref "Environment"]]
+  standbynatgw:
+    Type: "AWS::EC2::NatGateway"
+    Properties:
+      AllocationId: 
+        Fn::GetAtt:
+        - standbynateip
+        - AllocationId
+      SubnetId: !Ref standbypulicsubnet
+      Tags: 
+      - Key: Name
+        Value: !Join [ "-", [ ngw-standby, !Ref "ProjectName", !Ref "Environment"]]
+  primarynateip:
+    DependsOn: igwattachment
+    Type: "AWS::EC2::EIP"
+    Properties:
+      Domain: vpc
+  standbynateip:
+    DependsOn: internetgateway
+    Type: "AWS::EC2::EIP"
+    Properties:
+      Domain: vpc
+  publicroutetable:
+    Type: "AWS::EC2::RouteTable"
+    Properties:
+      VpcId: !Ref vpcresource
+      Tags:
+      - Key: Name
+        Value: !Join [ "-", [rt, !Ref "ProjectName", !Ref "Environment", public]]
+  privateprimaryroutetable:
+    Type: "AWS::EC2::RouteTable"
+    Properties:
+      VpcId: !Ref vpcresource
+      Tags:
+      - Key: Name
+        Value: !Join [ "-", [rt, !Ref "ProjectName", !Ref "Environment", primary, private]]
+  privatestandbyroutetable:
+    Type: "AWS::EC2::RouteTable"
+    Properties:
+      VpcId: !Ref vpcresource
+      Tags:
+      - Key: Name
+        Value: !Join [ "-", [rt, !Ref "ProjectName", !Ref "Environment", standby, private]]
+  databaseprimaryroutetable:
+    Type: "AWS::EC2::RouteTable"
+    Properties:
+      VpcId: !Ref vpcresource
+      Tags:
+      - Key: Name
+        Value: !Join [ "-", [rt, !Ref "ProjectName", !Ref "Environment", primary, database]]
+  databasestandbyroutetable:
+    Type: "AWS::EC2::RouteTable"
+    Properties:
+      VpcId: !Ref vpcresource
+      Tags:
+      - Key: Name
+        Value: !Join [ "-", [rt, !Ref "ProjectName", !Ref "Environment", standby, database]]
+  publicroute:
+    Type: "AWS::EC2::Route"
+    Properties:
+      RouteTableId: !Ref publicroutetable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref internetgateway
+  privateprimaryroute:
+    Type: "AWS::EC2::Route"
+    Properties:
+      RouteTableId: !Ref privateprimaryroutetable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref primarynatgw
+  privatestandbyroute:
+    Type: "AWS::EC2::Route"
+    Properties:
+      RouteTableId: !Ref privatestandbyroutetable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref standbynatgw
+  databaseprimaryroute:
+    Type: "AWS::EC2::Route"
+    Properties:
+      RouteTableId: !Ref databaseprimaryroutetable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref primarynatgw
+  databasestandbyroute:
+    Type: "AWS::EC2::Route"
+    Properties:
+      RouteTableId: !Ref databasestandbyroutetable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref standbynatgw
+  primarypublicrtassociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: primarypulicsubnet
+      RouteTableId:
+        Ref: publicroutetable
+  standbypublicrtassociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: standbypulicsubnet
+      RouteTableId:
+        Ref: publicroutetable
+  primaryprivatertassociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: primaryprivatesubnet
+      RouteTableId:
+        Ref: privateprimaryroutetable
+  standbyprivatertassociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: standbyprivatesubnet
+      RouteTableId:
+        Ref: privatestandbyroutetable
+  primarydatabasertassociation1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: primarydatabasesubnet
+      RouteTableId:
+        Ref: databaseprimaryroutetable
+  standbydatabasertassociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: standbydatabasesubnet
+      RouteTableId:
+        Ref: databasestandbyroutetable
